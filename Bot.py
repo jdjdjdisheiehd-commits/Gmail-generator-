@@ -6,12 +6,17 @@ import random
 import string
 import requests
 import os
+import sys
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import Message
 
 # === КОНФИГ ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Берём токен из переменных окружения
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    print("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
+    sys.exit(1)
+
 MAIL_TM_API = "https://api.mail.tm"
 
 # Хранилище сессий пользователей (в памяти)
@@ -206,7 +211,6 @@ async def cmd_clear(message: Message):
 # === ЗАПУСК БОТА ===
 async def main():
     print("🚀 Telegram-бот запущен на Render!")
-    print(f"🤖 Бот: @{(await bot.get_me()).username}")
     print("=" * 50)
     await dp.start_polling(bot)
 
