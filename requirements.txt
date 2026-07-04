@@ -1,3 +1,4 @@
 aiogram==3.4.1
 requests==2.31.0
-nest-asyncio==1.6.0
+pydantic==2.6.4
+pydantic-core==2.16.3
