@@ -1,4 +1,4 @@
-# bot.py
+# bot.py (РАБОЧАЯ ВЕРСИЯ ДЛЯ RENDER)
 import asyncio
 import re
 import time
@@ -14,17 +14,14 @@ from aiogram.types import Message
 # === КОНФИГ ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
+    print("❌ Ошибка: BOT_TOKEN не найден!")
     sys.exit(1)
 
 MAIL_TM_API = "https://api.mail.tm"
-
-# Хранилище сессий пользователей (в памяти)
 user_sessions = {}
 
 # === РАБОТА С MAIL.TM ===
-def create_mail_tm_account() -> dict:
-    """Создаёт временный почтовый ящик через mail.tm"""
+def create_mail_tm_account():
     try:
         domains_resp = requests.get(f"{MAIL_TM_API}/domains", timeout=10)
         domains = domains_resp.json()
@@ -34,184 +31,101 @@ def create_mail_tm_account() -> dict:
         email = f"{local}@{domain}"
         password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
         
-        payload = {"address": email, "password": password}
-        resp = requests.post(f"{MAIL_TM_API}/accounts", json=payload, timeout=10)
+        resp = requests.post(f"{MAIL_TM_API}/accounts", json={"address": email, "password": password}, timeout=10)
         if resp.status_code != 201:
-            raise Exception(f"Ошибка создания почты: {resp.text}")
+            raise Exception(f"Ошибка: {resp.text}")
         
-        account_data = resp.json()
-        return {
-            "email": email,
-            "password": password,
-            "id": account_data['id']
-        }
+        return {"email": email, "password": password, "id": resp.json()['id']}
     except Exception as e:
         print(f"❌ Ошибка mail.tm: {e}")
         raise
 
-def get_mail_tm_token(email: str, password: str) -> str:
-    """Получает JWT токен для доступа к почтовому ящику"""
-    resp = requests.post(f"{MAIL_TM_API}/token", json={
-        "address": email,
-        "password": password
-    }, timeout=10)
-    if resp.status_code != 200:
-        raise Exception(f"Ошибка получения токена: {resp.text}")
-    return resp.json()['token']
-
-def get_messages(token: str) -> list:
-    """Получает список сообщений"""
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{MAIL_TM_API}/messages", headers=headers, timeout=10)
-    if resp.status_code != 200:
-        return []
-    return resp.json().get('hydra:member', [])
-
-def get_message_content(token: str, message_id: str) -> str:
-    """Получает содержимое сообщения"""
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{MAIL_TM_API}/messages/{message_id}", headers=headers, timeout=10)
-    if resp.status_code != 200:
-        return ""
-    data = resp.json()
-    if 'html' in data and data['html']:
-        return data['html'][0].get('body', '')
-    return data.get('text', '')
-
-def extract_code_from_html(html_content: str):
-    """Извлекает 6-значный код из письма"""
-    if not html_content:
-        return None
-    
-    match = re.search(r'\b(\d{6})\b', html_content)
-    if match:
-        return match.group(1)
-    
-    match = re.search(r'(?:code|код|verification|confirm)\s*[:;]\s*(\d{6})', html_content, re.IGNORECASE)
-    return match.group(1) if match else None
-
-def get_latest_code(email: str, password: str):
-    """Получает последний код из почтового ящика"""
+def get_latest_code(email, password):
     try:
-        token = get_mail_tm_token(email, password)
-        messages = get_messages(token)
+        resp = requests.post(f"{MAIL_TM_API}/token", json={"address": email, "password": password}, timeout=10)
+        token = resp.json()['token']
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        resp = requests.get(f"{MAIL_TM_API}/messages", headers=headers, timeout=10)
+        messages = resp.json().get('hydra:member', [])
         if not messages:
             return None
         
         latest = messages[-1]
-        content = get_message_content(token, latest['id'])
-        code = extract_code_from_html(content)
-        return code
+        resp = requests.get(f"{MAIL_TM_API}/messages/{latest['id']}", headers=headers, timeout=10)
+        content = resp.json().get('html', [{}])[0].get('body', '')
+        
+        match = re.search(r'\b(\d{6})\b', content)
+        return match.group(1) if match else None
     except Exception as e:
-        print(f"Ошибка при получении кода: {e}")
+        print(f"Ошибка: {e}")
         return None
 
-# === ОБРАБОТЧИКИ КОМАНД ===
+# === БОТ ===
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
+async def start(message: Message):
     await message.answer(
-        "👋 Привет! Я бот для работы с временной почтой mail.tm\n\n"
-        "📧 /gen — создать новую временную почту\n"
-        "🔑 /code — получить код подтверждения из последнего письма\n"
-        "ℹ️ /info — показать текущую почту\n"
-        "🗑️ /clear — удалить текущую сессию"
+        "👋 Бот для временной почты mail.tm\n\n"
+        "/gen — создать почту\n"
+        "/code — получить код\n"
+        "/info — текущая почта\n"
+        "/clear — удалить сессию"
     )
 
 @dp.message(Command("gen"))
-async def cmd_gen(message: Message):
+async def gen(message: Message):
     user_id = message.from_user.id
-    
     try:
-        mail_data = create_mail_tm_account()
-        
-        user_sessions[user_id] = {
-            "email": mail_data["email"],
-            "password": mail_data["password"],
-            "id": mail_data["id"],
-            "created_at": time.time()
-        }
-        
+        mail = create_mail_tm_account()
+        user_sessions[user_id] = mail
         await message.answer(
-            f"✅ Временная почта создана!\n\n"
-            f"📧 {mail_data['email']}\n"
-            f"🔑 Пароль: {mail_data['password']}\n\n"
-            f"💡 Используйте /code для получения кода из письма\n"
-            f"⏳ Письмо обычно приходит в течение 10-30 секунд"
+            f"✅ Почта создана!\n\n"
+            f"📧 {mail['email']}\n"
+            f"🔑 Пароль: {mail['password']}\n\n"
+            f"💡 Используйте /code для получения кода"
         )
     except Exception as e:
-        await message.answer(f"❌ Ошибка при создании почты: {str(e)}")
+        await message.answer(f"❌ Ошибка: {str(e)}")
 
 @dp.message(Command("code"))
-async def cmd_code(message: Message):
+async def code(message: Message):
     user_id = message.from_user.id
-    
     if user_id not in user_sessions:
-        await message.answer(
-            "❌ У вас нет активной почты.\n"
-            "Используйте /gen для создания новой."
-        )
+        await message.answer("❌ Сначала создайте почту: /gen")
         return
     
-    session = user_sessions[user_id]
-    email = session["email"]
-    password = session["password"]
+    mail = user_sessions[user_id]
+    await message.answer(f"🔍 Ищу код для {mail['email']}...")
     
-    try:
-        await message.answer(f"🔍 Ищу код для {email}...")
-        
-        code = get_latest_code(email, password)
-        
-        if code:
-            await message.answer(
-                f"✅ Код подтверждения найден!\n\n"
-                f"🔑 {code}\n\n"
-                f"📧 Почта: {email}"
-            )
-        else:
-            await message.answer(
-                f"❌ Код не найден.\n"
-                f"📧 Почта: {email}\n\n"
-                f"💡 Возможные причины:\n"
-                f"• Письмо ещё не пришло (подождите 10-30 секунд)\n"
-                f"• Письмо пришло в спам\n"
-                f"• Нет новых писем\n\n"
-                f"Попробуйте ещё раз через 15 секунд."
-            )
-    except Exception as e:
-        await message.answer(f"❌ Ошибка при получении кода: {str(e)}")
+    code = get_latest_code(mail['email'], mail['password'])
+    if code:
+        await message.answer(f"✅ Код: {code}")
+    else:
+        await message.answer(f"❌ Код не найден. Проверьте почту через 10 секунд.")
 
 @dp.message(Command("info"))
-async def cmd_info(message: Message):
+async def info(message: Message):
     user_id = message.from_user.id
-    
     if user_id not in user_sessions:
-        await message.answer("❌ У вас нет активной почты. Используйте /gen.")
+        await message.answer("❌ Нет активной почты.")
         return
     
-    session = user_sessions[user_id]
-    await message.answer(
-        f"📧 Текущая почта: {session['email']}\n"
-        f"🆔 ID: {session['id']}\n"
-        f"⏱️ Создана: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(session['created_at']))}"
-    )
+    mail = user_sessions[user_id]
+    await message.answer(f"📧 {mail['email']}")
 
 @dp.message(Command("clear"))
-async def cmd_clear(message: Message):
+async def clear(message: Message):
     user_id = message.from_user.id
-    
     if user_id in user_sessions:
         del user_sessions[user_id]
-        await message.answer("🗑️ Сессия очищена. Почта удалена из памяти.")
-    else:
-        await message.answer("❌ У вас нет активной сессии.")
+        await message.answer("🗑️ Сессия удалена.")
 
-# === ЗАПУСК БОТА ===
+# === ЗАПУСК ===
 async def main():
-    print("🚀 Telegram-бот запущен на Render!")
-    print("=" * 50)
+    print("🚀 Бот запущен на Render!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
