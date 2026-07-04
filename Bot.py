@@ -76,16 +76,24 @@ def get_message_content(token, message_id):
     if resp.status_code != 200:
         return ""
     data = resp.json()
-    if 'html' in data and data['html']:
-        return data['html'][0].get('body', '')
-    return data.get('text', '')
+    parts=[]
+    for key in ("text","intro","subject"):
+        if data.get(key):
+            parts.append(str(data[key]))
+    html=data.get("html")
+    if html:
+        if isinstance(html,list):
+            parts.extend(map(str,html))
+        else:
+            parts.append(str(html))
+    return "\n".join(parts)
 
 def extract_code_from_html(html_content):
     """Извлекает 6-значный код из письма"""
     if not html_content:
         return None
     
-    match = re.search(r'\b(\d{6})\b', html_content)
+    match = re.search(r'\b(\d{4,8})\b', html_content)
     if match:
         return match.group(1)
     
